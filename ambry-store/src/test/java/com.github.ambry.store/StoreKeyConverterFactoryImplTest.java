@@ -12,12 +12,14 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
 
-package com.github.ambry.server;
+package com.github.ambry.store;
 
 import com.codahale.metrics.MetricRegistry;
 import com.github.ambry.config.VerifiableProperties;
 import com.github.ambry.store.StoreKeyConverter;
 import com.github.ambry.store.StoreKeyConverterFactory;
+import com.github.ambry.store.StoreKeyConverterFactoryImpl;
+import com.github.ambry.store.StoreKeyConverterImplNoOp;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
