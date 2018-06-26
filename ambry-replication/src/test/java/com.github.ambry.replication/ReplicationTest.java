@@ -55,7 +55,6 @@ import com.github.ambry.store.FindToken;
 import com.github.ambry.store.MessageInfo;
 import com.github.ambry.store.MessageReadSet;
 import com.github.ambry.store.MessageWriteSet;
-import com.github.ambry.store.MockStoreKeyConverterFactory;
 import com.github.ambry.store.Store;
 import com.github.ambry.store.StoreErrorCodes;
 import com.github.ambry.store.StoreException;
@@ -417,23 +416,11 @@ public class ReplicationTest {
     int missingBuffersIndex = 0;
 
     for (int missingKeysCount : missingKeysCounts) {
-      expectedIndex += (batchSize - 1);
-      List<ReplicaThread.ExchangeMetadataResponse> response =
-          replicaThread.exchangeMetadata(new MockConnection(remoteHost, batchSize),
-              replicasToReplicate.get(remoteHost.dataNodeId));
-      assertEquals("Response should contain a response for each replica",
-          replicasToReplicate.get(remoteHost.dataNodeId).size(), response.size());
-      for (int i = 0; i < response.size(); i++) {
-        assertEquals(missingKeysCount, response.get(i).missingStoreKeys.size());
-        assertEquals(expectedIndex, ((MockFindToken) response.get(i).remoteToken).getIndex());
-        replicasToReplicate.get(remoteHost.dataNodeId).get(i).setToken(response.get(i).remoteToken);
-      }
-      replicaThread.fixMissingStoreKeys(new MockConnection(remoteHost, batchSize),
-          replicasToReplicate.get(remoteHost.dataNodeId), response);
-      for (int i = 0; i < response.size(); i++) {
-        assertEquals("Token should have been set correctly in fixMissingStoreKeys()", response.get(i).remoteToken,
-            replicasToReplicate.get(remoteHost.dataNodeId).get(i).getToken());
-      }
+
+      expectedIndex =
+          assertMissingKeysAndFixMissingStoreKeys(expectedIndex, batchSize - 1, batchSize, missingKeysCount, replicaThread, remoteHost,
+              replicasToReplicate);
+
       missingBuffers = remoteHost.getMissingBuffers(localHost.buffersByPartition);
       for (Map.Entry<PartitionId, List<ByteBuffer>> entry : missingBuffers.entrySet()) {
         if (partitionIds.indexOf(entry.getKey()) % 2 == 0) {
@@ -468,9 +455,6 @@ public class ReplicationTest {
       assertEquals("Token should have been set correctly in fixMissingStoreKeys()", response.get(i).remoteToken,
           replicasToReplicate.get(remoteHost.dataNodeId).get(i).getToken());
     }
-    ////////ADDING STUFF
-
-    //ADD MESSAGES
 
     /*
         STORE KEY CONVERTER MAPPING
@@ -520,24 +504,9 @@ public class ReplicationTest {
       addPutMessagesToReplicasOfPartition(Arrays.asList(b0, b1, b2), Arrays.asList(remoteHost));
     }
 
-//    batchSize = 4;
-    expectedIndex += (batchSize - 1);
-    response = replicaThread.exchangeMetadata(new MockConnection(remoteHost, batchSize),
-        replicasToReplicate.get(remoteHost.dataNodeId));
-    assertEquals("Response should contain a response for each replica",
-        replicasToReplicate.get(remoteHost.dataNodeId).size(), response.size());
-    for (int i = 0; i < response.size(); i++) {
-      assertEquals(1, response.get(i).missingStoreKeys.size());
-      assertEquals(i % 2 == 0 ? expectedIndex : expectedIndex + 1,
-          ((MockFindToken) response.get(i).remoteToken).getIndex());
-      replicasToReplicate.get(remoteHost.dataNodeId).get(i).setToken(response.get(i).remoteToken);
-    }
-    replicaThread.fixMissingStoreKeys(new MockConnection(remoteHost, batchSize),
-        replicasToReplicate.get(remoteHost.dataNodeId), response);
-    for (int i = 0; i < response.size(); i++) {
-      assertEquals("Token should have been set correctly in fixMissingStoreKeys()", response.get(i).remoteToken,
-          replicasToReplicate.get(remoteHost.dataNodeId).get(i).getToken());
-    }
+    expectedIndex =
+        assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex + 1, batchSize - 1, batchSize, 1, replicaThread, remoteHost,
+            replicasToReplicate);
 
     /*
         BEFORE
@@ -557,7 +526,7 @@ public class ReplicationTest {
                 dB2
         delete B0 gets converted
         to delete B0' in Local
-        Missing Keys: 1
+        Missing Keys: 0
 
      */
     //delete blob
@@ -569,23 +538,8 @@ public class ReplicationTest {
       }
     }
 
-    expectedIndex += 2;
-    response = replicaThread.exchangeMetadata(new MockConnection(remoteHost, batchSize),
-        replicasToReplicate.get(remoteHost.dataNodeId));
-    assertEquals("Response should contain a response for each replica",
-        replicasToReplicate.get(remoteHost.dataNodeId).size(), response.size());
-    for (int i = 0; i < response.size(); i++) {
-      assertEquals(0, response.get(i).missingStoreKeys.size());
-      assertEquals(i % 2 == 0 ? expectedIndex : expectedIndex + 1,
-          ((MockFindToken) response.get(i).remoteToken).getIndex());
-      replicasToReplicate.get(remoteHost.dataNodeId).get(i).setToken(response.get(i).remoteToken);
-    }
-    replicaThread.fixMissingStoreKeys(new MockConnection(remoteHost, batchSize),
-        replicasToReplicate.get(remoteHost.dataNodeId), response);
-    for (int i = 0; i < response.size(); i++) {
-      assertEquals("Token should have been set correctly in fixMissingStoreKeys()", response.get(i).remoteToken,
-          replicasToReplicate.get(remoteHost.dataNodeId).get(i).getToken());
-    }
+    expectedIndex = assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex + 1, 2, batchSize, 0, replicaThread, remoteHost,
+        replicasToReplicate);
 
     ////////END ADDING STUFF
 
@@ -600,7 +554,8 @@ public class ReplicationTest {
           ((MockFindToken) response.get(i).remoteToken).getIndex());
     }
 
-    Map<PartitionId, List<MessageInfo>> missingInfos = remoteHost.getMissingInfos(localHost.infosByPartition, storeKeyConverter);
+    Map<PartitionId, List<MessageInfo>> missingInfos =
+        remoteHost.getMissingInfos(localHost.infosByPartition, storeKeyConverter);
     for (Map.Entry<PartitionId, List<MessageInfo>> entry : missingInfos.entrySet()) {
       // test that the first key has been marked deleted
       List<MessageInfo> messageInfos = localHost.infosByPartition.get(entry.getKey());
@@ -684,6 +639,38 @@ public class ReplicationTest {
     assertEquals(token4, remoteReplicaInfo.getToken());
     assertEquals(token4, remoteReplicaInfo.getTokenToPersist());
     remoteReplicaInfo.onTokenPersisted();
+  }
+
+  private int assertMissingKeysAndFixMissingStoreKeys(int expectedIndex, int expectedIndexInc, int batchSize, int expectedMissingKeysSum,
+      ReplicaThread replicaThread, Host remoteHost, Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate)
+      throws Exception {
+    return assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex, expectedIndexInc, batchSize, expectedMissingKeysSum,
+        replicaThread, remoteHost, replicasToReplicate);
+  }
+
+  private int assertMissingKeysAndFixMissingStoreKeys(int expectedIndex, int expectedIndexOdd, int expectedIndexInc, int batchSize,
+      int expectedMissingKeysSum, ReplicaThread replicaThread, Host remoteHost,
+      Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate) throws Exception {
+    expectedIndex += expectedIndexInc;
+    expectedIndexOdd += expectedIndexInc;
+    List<ReplicaThread.ExchangeMetadataResponse> response =
+        replicaThread.exchangeMetadata(new MockConnection(remoteHost, batchSize),
+            replicasToReplicate.get(remoteHost.dataNodeId));
+    assertEquals("Response should contain a response for each replica",
+        replicasToReplicate.get(remoteHost.dataNodeId).size(), response.size());
+    for (int i = 0; i < response.size(); i++) {
+      assertEquals(expectedMissingKeysSum, response.get(i).missingStoreKeys.size());
+      assertEquals(i % 2 == 0 ? expectedIndex : expectedIndexOdd,
+          ((MockFindToken) response.get(i).remoteToken).getIndex());
+      replicasToReplicate.get(remoteHost.dataNodeId).get(i).setToken(response.get(i).remoteToken);
+    }
+    replicaThread.fixMissingStoreKeys(new MockConnection(remoteHost, batchSize),
+        replicasToReplicate.get(remoteHost.dataNodeId), response);
+    for (int i = 0; i < response.size(); i++) {
+      assertEquals("Token should have been set correctly in fixMissingStoreKeys()", response.get(i).remoteToken,
+          replicasToReplicate.get(remoteHost.dataNodeId).get(i).getToken());
+    }
+    return expectedIndex;
   }
 
   /**
