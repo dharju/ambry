@@ -62,6 +62,7 @@ import com.github.ambry.store.StoreGetOptions;
 import com.github.ambry.store.StoreInfo;
 import com.github.ambry.store.StoreKey;
 import com.github.ambry.store.StoreKeyConverter;
+import com.github.ambry.store.StoreKeyConverterFactoryImpl;
 import com.github.ambry.store.StoreKeyFactory;
 import com.github.ambry.store.StoreStats;
 import com.github.ambry.store.Write;
@@ -129,7 +130,7 @@ public class ReplicationTest {
         new ReplicationMetrics(new MetricRegistry(), clusterMap.getReplicaIds(localHost.dataNodeId));
     replicationMetrics.populatePerColoMetrics(Collections.singleton(remoteHost.dataNodeId.getDatacenterName()));
     StoreKeyFactory storeKeyFactory = Utils.getObj("com.github.ambry.commons.BlobIdFactory", clusterMap);
-    StoreKeyConverter storeKeyConverter = new NoOpConverter();
+    StoreKeyConverter storeKeyConverter = new StoreKeyConverterFactoryImpl(null, null).getStoreKeyConverter();
 
     Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate = new HashMap<>();
     CountDownLatch readyToPause = new CountDownLatch(1);
@@ -226,7 +227,7 @@ public class ReplicationTest {
         new ReplicationMetrics(new MetricRegistry(), clusterMap.getReplicaIds(localHost.dataNodeId));
     replicationMetrics.populatePerColoMetrics(Collections.singleton(remoteHost.dataNodeId.getDatacenterName()));
     StoreKeyFactory storeKeyFactory = Utils.getObj("com.github.ambry.commons.BlobIdFactory", clusterMap);
-    StoreKeyConverter storeKeyConverter = new NoOpConverter();
+    StoreKeyConverter storeKeyConverter = new StoreKeyConverterFactoryImpl(null, null).getStoreKeyConverter();
     Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate = new HashMap<>();
     replicasToReplicate.put(remoteHost.dataNodeId, localHost.getRemoteReplicaInfos(remoteHost, null));
     Map<DataNodeId, Host> hosts = new HashMap<>();
@@ -417,9 +418,8 @@ public class ReplicationTest {
 
     for (int missingKeysCount : missingKeysCounts) {
 
-      expectedIndex =
-          assertMissingKeysAndFixMissingStoreKeys(expectedIndex, batchSize - 1, batchSize, missingKeysCount, replicaThread, remoteHost,
-              replicasToReplicate);
+      expectedIndex = assertMissingKeysAndFixMissingStoreKeys(expectedIndex, batchSize - 1, batchSize, missingKeysCount,
+          replicaThread, remoteHost, replicasToReplicate);
 
       missingBuffers = remoteHost.getMissingBuffers(localHost.buffersByPartition);
       for (Map.Entry<PartitionId, List<ByteBuffer>> entry : missingBuffers.entrySet()) {
@@ -505,8 +505,8 @@ public class ReplicationTest {
     }
 
     expectedIndex =
-        assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex + 1, batchSize - 1, batchSize, 1, replicaThread, remoteHost,
-            replicasToReplicate);
+        assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex + 1, batchSize - 1, batchSize, 1,
+            replicaThread, remoteHost, replicasToReplicate);
 
     /*
         BEFORE
@@ -538,8 +538,9 @@ public class ReplicationTest {
       }
     }
 
-    expectedIndex = assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex + 1, 2, batchSize, 0, replicaThread, remoteHost,
-        replicasToReplicate);
+    expectedIndex =
+        assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex + 1, 2, batchSize, 0, replicaThread,
+            remoteHost, replicasToReplicate);
 
     ////////END ADDING STUFF
 
@@ -641,15 +642,15 @@ public class ReplicationTest {
     remoteReplicaInfo.onTokenPersisted();
   }
 
-  private int assertMissingKeysAndFixMissingStoreKeys(int expectedIndex, int expectedIndexInc, int batchSize, int expectedMissingKeysSum,
-      ReplicaThread replicaThread, Host remoteHost, Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate)
-      throws Exception {
-    return assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex, expectedIndexInc, batchSize, expectedMissingKeysSum,
-        replicaThread, remoteHost, replicasToReplicate);
+  private int assertMissingKeysAndFixMissingStoreKeys(int expectedIndex, int expectedIndexInc, int batchSize,
+      int expectedMissingKeysSum, ReplicaThread replicaThread, Host remoteHost,
+      Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate) throws Exception {
+    return assertMissingKeysAndFixMissingStoreKeys(expectedIndex, expectedIndex, expectedIndexInc, batchSize,
+        expectedMissingKeysSum, replicaThread, remoteHost, replicasToReplicate);
   }
 
-  private int assertMissingKeysAndFixMissingStoreKeys(int expectedIndex, int expectedIndexOdd, int expectedIndexInc, int batchSize,
-      int expectedMissingKeysSum, ReplicaThread replicaThread, Host remoteHost,
+  private int assertMissingKeysAndFixMissingStoreKeys(int expectedIndex, int expectedIndexOdd, int expectedIndexInc,
+      int batchSize, int expectedMissingKeysSum, ReplicaThread replicaThread, Host remoteHost,
       Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate) throws Exception {
     expectedIndex += expectedIndexInc;
     expectedIndexOdd += expectedIndexInc;
@@ -1410,21 +1411,6 @@ public class ReplicationTest {
 
     @Override
     public void destroyConnection(ConnectedChannel connectedChannel) {
-    }
-  }
-
-  /**
-   * No-op StoreKeyConverter. StoreKeys get paired with themselves
-   */
-  class NoOpConverter implements StoreKeyConverter {
-
-    @Override
-    public Map<StoreKey, StoreKey> convert(Collection<? extends StoreKey> input) throws Exception {
-      Map<StoreKey, StoreKey> output = new HashMap<>();
-      if (input != null) {
-        input.forEach((storeKey) -> output.put(storeKey, storeKey));
-      }
-      return output;
     }
   }
 }
