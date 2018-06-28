@@ -21,6 +21,7 @@ import com.github.ambry.messageformat.MessageFormatException;
 import com.github.ambry.messageformat.MessageFormatRecord;
 import com.github.ambry.messageformat.PutMessageFormatInputStream;
 import com.github.ambry.utils.Utils;
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,7 +38,7 @@ import static com.github.ambry.messageformat.MessageFormatRecord.*;
  * Transformer implementation that replaces BlobIds in messages with
  * the converted value from the StoreKeyConverter
  */
-public class BlobIdTransformer implements StoreCopier.Transformer {
+public class BlobIdTransformer implements Transformer {
 
   private final StoreKeyConverter storeKeyConverter;
   private final StoreKeyFactory storeKeyFactory;
@@ -56,19 +57,21 @@ public class BlobIdTransformer implements StoreCopier.Transformer {
    * @throws Exception
    */
   @Override
-  public StoreCopier.Message transform(StoreCopier.Message message) throws Exception {
-    Objects.requireNonNull(message, "message must not be null");
-    Objects.requireNonNull(message.getMessageInfo(), "message's messageInfo must not be null");
-    Objects.requireNonNull(message.getStream(), "message's inputStream must not be null");
-    StoreKey oldStoreKey = message.getMessageInfo().getStoreKey();
-    StoreKey newStoreKey;
-    List<StoreKey> list = Collections.singletonList(oldStoreKey);
-    Map<StoreKey, StoreKey> storeKeyToStoreKey = storeKeyConverter.convert(list);
-    newStoreKey = storeKeyToStoreKey.get(oldStoreKey);
-    if (newStoreKey == null) {
-      return null;
+  public TransformationOutput transform(Message message) {
+    try {
+      Objects.requireNonNull(message, "message must not be null");
+      Objects.requireNonNull(message.getMessageInfo(), "message's messageInfo must not be null");
+      Objects.requireNonNull(message.getBytes(), "message's inputStream must not be null");
+      StoreKey oldStoreKey = message.getMessageInfo().getStoreKey();
+      StoreKey newStoreKey;
+      List<StoreKey> list = Collections.singletonList(oldStoreKey);
+      Map<StoreKey, StoreKey> storeKeyToStoreKey = storeKeyConverter.convert(list);
+      newStoreKey = storeKeyToStoreKey.get(oldStoreKey);
+      Message newMessage = newMessage(new ByteArrayInputStream(message.getBytes()), newStoreKey);
+      return new TransformationOutput(null, newMessage);
+    } catch (Exception e) {
+      return new TransformationOutput(e, null);
     }
-    return newMessage(message.getStream(), newStoreKey);
   }
 
   /**
@@ -110,17 +113,16 @@ public class BlobIdTransformer implements StoreCopier.Transformer {
   }
 
   /**
-   * Creates a StoreCopier.Message from the old StoreCopier.Message
+   * Creates a Message from the old Message
    * input stream, replacing the old store key and account/container IDs
    * with a new store key and account/container IDs
-   * @param inputStream the input stream of the StoreCopier.Message
+   * @param inputStream the input stream of the Message
    * @param newKey the new StoreKey
-   * @return new StoreCopier.Message message
+   * @return new Message message
    * @throws IOException
    * @throws MessageFormatException
    */
-  private StoreCopier.Message newMessage(InputStream inputStream, StoreKey newKey)
-      throws IOException, MessageFormatException {
+  private Message newMessage(InputStream inputStream, StoreKey newKey) throws IOException, MessageFormatException {
     MessageHeader_Format headerFormat = getMessageHeader(inputStream);
     storeKeyFactory.getStoreKey(new DataInputStream(inputStream));
     BlobId newBlobId = (BlobId) newKey;
@@ -145,7 +147,9 @@ public class BlobIdTransformer implements StoreCopier.Transformer {
       MessageInfo info = new MessageInfo(newKey, putMessageFormatInputStream.getSize(),
           Utils.addSecondsToEpochTime(newProperties.getCreationTimeInMs(), newProperties.getTimeToLiveInSeconds()),
           newProperties.getAccountId(), newProperties.getContainerId(), newProperties.getCreationTimeInMs());
-      return new StoreCopier.Message(info, putMessageFormatInputStream);
+      byte[] streamBytes = new byte[(int) putMessageFormatInputStream.getSize()];
+      putMessageFormatInputStream.read(streamBytes);
+      return new Message(info, streamBytes);
     } else {
       throw new IllegalArgumentException("Only 'put' records are valid");
     }

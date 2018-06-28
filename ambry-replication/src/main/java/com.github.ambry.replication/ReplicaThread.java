@@ -348,7 +348,7 @@ class ReplicaThread implements Runnable {
                   remoteNode, twoWayConverterCache);
               ExchangeMetadataResponse exchangeMetadataResponse =
                   new ExchangeMetadataResponse(missingStoreKeys, replicaMetadataResponseInfo.getFindToken(),
-                      replicaMetadataResponseInfo.getRemoteReplicaLagInBytes());
+                      replicaMetadataResponseInfo.getRemoteReplicaLagInBytes(), twoWayConverterCache);
               exchangeMetadataResponseList.add(exchangeMetadataResponse);
             } catch (Exception e) {
               replicationMetrics.updateLocalStoreError(remoteReplicaInfo.getReplicaId());
@@ -477,7 +477,7 @@ class ReplicaThread implements Runnable {
    * store keys.  Assumes that input mapping
    * maps remote keys to local keys.
    */
-  private class TwoWayConverterCache {
+  private class TwoWayConverterCache implements StoreKeyConverter {
     private Map<StoreKey, StoreKey> localToRemote;
     private Map<StoreKey, StoreKey> remoteToLocal;
 
@@ -490,11 +490,26 @@ class ReplicaThread implements Runnable {
     }
 
     public StoreKey getRemote(StoreKey localKey) {
+      if (!localToRemote.containsKey(localKey)) {
+        throw new IllegalStateException("Found input not in the cache. All inputs should be in the cache");
+      }
       return localToRemote.get(localKey);
     }
 
     public StoreKey getLocal(StoreKey remoteKey) {
+      if (!remoteToLocal.containsKey(remoteKey)) {
+        throw new IllegalStateException("Found input not in the cache. All inputs should be in the cache");
+      }
       return remoteToLocal.get(remoteKey);
+    }
+
+    @Override
+    public Map<StoreKey, StoreKey> convert(Collection<? extends StoreKey> input) throws Exception {
+      Map<StoreKey, StoreKey> map = new HashMap<>();
+      for (StoreKey storeKey : input) {
+        map.put(storeKey, getLocal(storeKey));
+      }
+      return map;
     }
   }
 
@@ -737,7 +752,7 @@ class ReplicaThread implements Runnable {
               MessageFormatWriteSet writeset;
               MessageSievingInputStream validMessageDetectionInputStream =
                   new MessageSievingInputStream(getResponse.getInputStream(), messageInfoList, storeKeyFactory,
-                      transformMessageStream ? storeKeyConverter : null, metricRegistry);
+                      transformMessageStream ? exchangeMetadataResponse.cachedConverter : null, metricRegistry);
               if (validMessageDetectionInputStream.hasInvalidMessages()) {
                 replicationMetrics.incrementInvalidMessageError(partitionResponseInfo.getPartition());
                 logger.error("Out of " + (messageInfoList.size()) + " messages, " + (messageInfoList.size()
@@ -803,12 +818,15 @@ class ReplicaThread implements Runnable {
     final FindToken remoteToken;
     final long localLagFromRemoteInBytes;
     final ServerErrorCode serverErrorCode;
+    final StoreKeyConverter cachedConverter;
 
-    ExchangeMetadataResponse(Set<StoreKey> missingStoreKeys, FindToken remoteToken, long localLagFromRemoteInBytes) {
+
+    ExchangeMetadataResponse(Set<StoreKey> missingStoreKeys, FindToken remoteToken, long localLagFromRemoteInBytes, StoreKeyConverter cachedConverter) {
       this.missingStoreKeys = missingStoreKeys;
       this.remoteToken = remoteToken;
       this.localLagFromRemoteInBytes = localLagFromRemoteInBytes;
       this.serverErrorCode = ServerErrorCode.No_Error;
+      this.cachedConverter = cachedConverter;
     }
 
     ExchangeMetadataResponse(ServerErrorCode errorCode) {
@@ -816,6 +834,7 @@ class ReplicaThread implements Runnable {
       remoteToken = null;
       localLagFromRemoteInBytes = -1;
       this.serverErrorCode = errorCode;
+      this.cachedConverter = null;
     }
   }
 
