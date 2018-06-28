@@ -518,6 +518,12 @@ class ReplicaThread implements Runnable {
     }
     //CONVERT STORE KEYS HERE
     Map<StoreKey, StoreKey> map = storeKeyConverter.convert(storeKeysToCheck);
+//    dumbStoreKeyCovnerter = new DumbStoreKeyFonverter(map);
+//
+//    storyKeyConverter.cacheResults(map);
+//
+//    // this is somewhere else
+//    storyKeyConverter.clear(keys);
     converter.setRemoteToLocal(map);
     List<StoreKey> convertedKeys = new ArrayList<>();
     for (StoreKey val : map.values()) {
