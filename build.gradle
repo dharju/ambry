@@ -217,6 +217,7 @@ project(':ambry-replication') {
         testCompile project(':ambry-api').sourceSets.test.output
         testCompile project(':ambry-utils').sourceSets.test.output
         testCompile project(':ambry-commons').sourceSets.test.output
+        testCompile project(':ambry-api').sourceSets.test.output
     }
 }
 

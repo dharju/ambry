@@ -24,8 +24,8 @@ import com.github.ambry.messageformat.MessageFormatInputStream;
 import com.github.ambry.messageformat.PutMessageFormatBlobV1InputStream;
 import com.github.ambry.messageformat.PutMessageFormatInputStream;
 import com.github.ambry.utils.Pair;
+import com.github.ambry.utils.TestUtils;
 import com.github.ambry.utils.Utils;
-
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,6 +36,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import org.junit.Assert;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -45,17 +46,11 @@ import static org.junit.Assert.*;
  * Tests the BlobIdTransformer
  */
 public class BlobIdTransformerTest {
-
   private final ClusterMap clusterMap = new MockReadingClusterMap();
-
   private final BlobIdFactory blobIdFactory = new BlobIdFactory(clusterMap);
-
   private final BlobIdTransformer transformer;
-
   private final List<Pair> pairList;
-
   private final MockStoreKeyConverterFactory factory;
-
   private static final int BLOB_STREAM_SIZE = 128;
   private static final int BLOB_ENCRYPTION_KEY_SIZE = 32;
   private static final int USER_META_DATA_SIZE = 64;
@@ -88,7 +83,7 @@ public class BlobIdTransformerTest {
     factory = new MockStoreKeyConverterFactory(null, null);
     factory.setReturnInputIfAbsent(true);
     StoreKeyConverter storeKeyConverter = createAndSetupMockStoreKeyConverter(factory, pairs);
-    transformer = new BlobIdTransformer(storeKeyConverter, blobIdFactory);
+    transformer = new BlobIdTransformer(blobIdFactory, storeKeyConverter);
     pairList = new ArrayList<>(Arrays.asList(pairs));
     pairList.add(new Pair<>(VERSION_3_UNCONVERTED, VERSION_3_UNCONVERTED));
   }
@@ -102,8 +97,8 @@ public class BlobIdTransformerTest {
     for (Pair pair : pairList) {
       for (Class clazz : VALID_MESSAGE_FORMAT_INPUT_STREAM_IMPLS) {
         InputAndExpected inputAndExpected = new InputAndExpected(pair, clazz);
-        Message output = transformer.transform(inputAndExpected.getInput()).getMsg();
-        verifyOutput(output, inputAndExpected.getExpected());
+        TransformationOutput output = transformer.transform(inputAndExpected.getInput());
+        verifyOutput(output.getMsg(), inputAndExpected.getExpected());
       }
     }
   }
@@ -136,17 +131,18 @@ public class BlobIdTransformerTest {
   public void testBrokenStoreKeyConverter() throws Exception {
     InputAndExpected inputAndExpected =
         new InputAndExpected(pairList.get(0), VALID_MESSAGE_FORMAT_INPUT_STREAM_IMPLS[0]);
-    Message output = transformer.transform(inputAndExpected.getInput()).getMsg();
-    verifyOutput(output, inputAndExpected.getExpected());
+    TransformationOutput output = transformer.transform(inputAndExpected.getInput());
+    verifyOutput(output.getMsg(), inputAndExpected.getExpected());
 
     factory.setException(new BlobIdTransformerTestException());
     inputAndExpected = new InputAndExpected(pairList.get(1), VALID_MESSAGE_FORMAT_INPUT_STREAM_IMPLS[0]);
-    assertException(transformer.transform(inputAndExpected.getInput()), BlobIdTransformerTestException.class);
-
+    output = transformer.transform(inputAndExpected.getInput());
+    Assert.assertTrue("Should lead to IllegalStateException",
+        output.getException() instanceof IllegalStateException);
     factory.setException(null);
     inputAndExpected = new InputAndExpected(pairList.get(2), VALID_MESSAGE_FORMAT_INPUT_STREAM_IMPLS[0]);
-    output = transformer.transform(inputAndExpected.getInput()).getMsg();
-    verifyOutput(output, inputAndExpected.getExpected());
+    output = transformer.transform(inputAndExpected.getInput());
+    verifyOutput(output.getMsg(), inputAndExpected.getExpected());
   }
 
   /**
@@ -155,7 +151,7 @@ public class BlobIdTransformerTest {
   @Test
   public void testNullStoreKeyConverter() throws IOException {
     try {
-      new BlobIdTransformer(null, blobIdFactory);
+      new BlobIdTransformer(blobIdFactory, null);
       fail("Did not throw NullPointerException");
     } catch (NullPointerException e) {
       //expected
@@ -168,7 +164,7 @@ public class BlobIdTransformerTest {
   @Test
   public void testNullStoreKeyFactory() throws IOException {
     try {
-      new BlobIdTransformer(factory.getStoreKeyConverter(), null);
+      new BlobIdTransformer(null, factory.getStoreKeyConverter());
       fail("Did not throw NullPointerException");
     } catch (NullPointerException e) {
       //expected
@@ -194,7 +190,8 @@ public class BlobIdTransformerTest {
     //null msgBytes
     Message message = new Message(messageInfo, null);
     assertException(transformer.transform(message), NullPointerException.class);
-    message = new Message(null, new byte[30]);
+    //null messageInfo
+    message = new Message(null,new ByteArrayInputStream( new byte[30]));
     assertException(transformer.transform(message), NullPointerException.class);
   }
 
@@ -220,7 +217,7 @@ public class BlobIdTransformerTest {
       assertNull("output should be null", output);
     } else {
       assertEquals("MessageInfos not equal", expected.getMessageInfo(), output.getMessageInfo());
-      assertArrayEquals("Message bytes not equal", expected.getBytes(), output.getBytes());
+      TestUtils.assertInputStreamEqual(expected.getStream(), output.getStream(), (int)expected.getMessageInfo().getSize(), true);
     }
   }
 
@@ -310,9 +307,7 @@ public class BlobIdTransformerTest {
       messageInfo = new MessageInfo(blobId, inputStreamSize, false, false,
           Utils.addSecondsToEpochTime(blobProperties.getCreationTimeInMs(), blobProperties.getTimeToLiveInSeconds()),
           null, blobId.getAccountId(), blobId.getContainerId(), blobProperties.getCreationTimeInMs());
-      byte[] inputStreamBytes = new byte[inputStreamSize];
-      inputStream.read(inputStreamBytes);
-      Message message = new Message(messageInfo, inputStreamBytes);
+      Message message = new Message(messageInfo, inputStream);
       return message;
     }
 

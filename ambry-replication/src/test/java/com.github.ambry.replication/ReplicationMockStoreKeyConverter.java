@@ -51,7 +51,15 @@ class ReplicationMockStoreKeyConverter implements StoreKeyConverter {
       return answer;
     }
 
-    /**
+  @Override
+  public StoreKey getConverted(StoreKey storeKey) {
+    if (!map.containsKey(storeKey)) {
+      throw new IllegalStateException("Did not convert key yet.  Key: "+storeKey);
+    }
+    return map.get(storeKey);
+  }
+
+  /**
      * Same as Exception; just used to identify exceptions
      * thrown by the outer class
      */

@@ -14,7 +14,8 @@
 package com.github.ambry.store;
 
 /**
- * An interface for a transformation function. Transformations can modify any data in the message (including keys).
+ * An interface for a transformation function. Transformations parse the message and may modify any data in the message
+ * (including keys).
  * Needs to be thread safe.
  */
 public interface Transformer {
@@ -23,9 +24,8 @@ public interface Transformer {
    * Transforms the input {@link Message} into an output {@link Message}.
    * @param message the input {@link Message} to change.
    * @return the output {@link TransformationOutput}.
-   * @throws Exception if transform encounters an exception when transforming a message
    */
-  TransformationOutput transform(Message message) throws Exception;
+  TransformationOutput transform(Message message);
 }
 
 

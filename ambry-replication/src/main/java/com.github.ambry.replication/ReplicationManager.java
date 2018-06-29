@@ -32,6 +32,7 @@ import com.github.ambry.store.Store;
 import com.github.ambry.store.StoreKeyConverter;
 import com.github.ambry.store.StoreKeyConverterFactory;
 import com.github.ambry.store.StoreKeyFactory;
+import com.github.ambry.store.Transformer;
 import com.github.ambry.utils.CrcInputStream;
 import com.github.ambry.utils.CrcOutputStream;
 import com.github.ambry.utils.SystemTime;
@@ -271,7 +272,8 @@ public class ReplicationManager {
   private final List<String> sslEnabledDatacenters;
   private final Map<String, List<ReplicaThread>> replicaThreadPools;
   private final Map<String, Integer> numberOfReplicaThreads;
-  private final StoreKeyConverter storeKeyConverter;
+  private final StoreKeyConverterFactory storeKeyConverterFactory;
+  private final String transformerClassName;
 
   private static final String replicaTokenFileName = "replicaTokens";
   private static final short Crc_Size = 8;
@@ -281,8 +283,7 @@ public class ReplicationManager {
       StoreConfig storeConfig, StorageManager storageManager, StoreKeyFactory storeKeyFactory, ClusterMap clusterMap,
       ScheduledExecutorService scheduler, DataNodeId dataNode, ConnectionPool connectionPool,
       MetricRegistry metricRegistry, NotificationSystem requestNotification,
-      StoreKeyConverterFactory storeKeyConverterFactory) throws ReplicationException {
-
+      StoreKeyConverterFactory storeKeyConverterFactory, String transformerClassName) throws ReplicationException {
     try {
       this.replicationConfig = replicationConfig;
       this.storeKeyFactory = storeKeyFactory;
@@ -303,8 +304,8 @@ public class ReplicationManager {
       this.dataNodeRemoteReplicaInfosPerDC = new HashMap<>();
       this.sslEnabledDatacenters = Utils.splitString(clusterMapConfig.clusterMapSslEnabledDatacenters, ",");
       this.numberOfReplicaThreads = new HashMap<>();
-      this.storeKeyConverter =
-          storeKeyConverterFactory != null ? storeKeyConverterFactory.getStoreKeyConverter() : null;
+      this.storeKeyConverterFactory = storeKeyConverterFactory;
+      this.transformerClassName = transformerClassName;
 
       // initialize all partitions
       for (ReplicaId replicaId : replicaIds) {
@@ -513,7 +514,7 @@ public class ReplicationManager {
   /**
    * Partitions the list of data nodes between given set of replica threads for the given DC
    */
-  private void assignReplicasToThreadPool() {
+  private void assignReplicasToThreadPool() throws IOException {
     for (Map.Entry<String, DataNodeRemoteReplicaInfos> mapEntry : dataNodeRemoteReplicaInfosPerDC.entrySet()) {
       String datacenter = mapEntry.getKey();
       DataNodeRemoteReplicaInfos dataNodeRemoteReplicaInfos = mapEntry.getValue();
@@ -569,15 +570,22 @@ public class ReplicationManager {
         String threadIdentity =
             "Replica Thread-" + (dataNodeId.getDatacenterName().equals(datacenter) ? "Intra-" : "Inter") + i
                 + datacenter;
-        ReplicaThread replicaThread =
-            new ReplicaThread(threadIdentity, replicasForThread, factory, clusterMap, correlationIdGenerator,
-                dataNodeId, connectionPool, replicationConfig, replicationMetrics, notification, storeKeyFactory,
-                replicationConfig.replicationTransformMessageStream, storeKeyConverter, metricRegistry,
-                replicatingOverSsl, datacenter, responseHandler);
-        if (replicaThreadPools.containsKey(datacenter)) {
-          replicaThreadPools.get(datacenter).add(replicaThread);
-        } else {
-          replicaThreadPools.put(datacenter, new ArrayList<>(Arrays.asList(replicaThread)));
+        try {
+          StoreKeyConverter threadSpecificKeyConverter = storeKeyConverterFactory.getStoreKeyConverter();
+          Transformer threadSpecificTransformer =
+              Utils.getObj(transformerClassName, storeKeyFactory, threadSpecificKeyConverter);
+          ReplicaThread replicaThread =
+              new ReplicaThread(threadIdentity, replicasForThread, factory, clusterMap, correlationIdGenerator,
+                  dataNodeId, connectionPool, replicationConfig, replicationMetrics, notification, storeKeyFactory,
+                  threadSpecificKeyConverter, threadSpecificTransformer, metricRegistry, replicatingOverSsl, datacenter,
+                  responseHandler);
+          if (replicaThreadPools.containsKey(datacenter)) {
+            replicaThreadPools.get(datacenter).add(replicaThread);
+          } else {
+            replicaThreadPools.put(datacenter, new ArrayList<>(Arrays.asList(replicaThread)));
+          }
+        } catch (Exception e) {
+          throw new IOException("Encountered exception instantiating ReplicaThread", e);
         }
       }
     }

@@ -51,6 +51,7 @@ import com.github.ambry.store.StoreException;
 import com.github.ambry.store.StoreKey;
 import com.github.ambry.store.StoreKeyConverter;
 import com.github.ambry.store.StoreKeyFactory;
+import com.github.ambry.store.Transformer;
 import com.github.ambry.utils.ByteBufferInputStream;
 import com.github.ambry.utils.SystemTime;
 import java.io.DataInputStream;
@@ -93,9 +94,8 @@ class ReplicaThread implements Runnable {
   private final String threadName;
   private final NotificationSystem notification;
   private final Logger logger = LoggerFactory.getLogger(getClass());
-  private final StoreKeyFactory storeKeyFactory;
-  private final boolean transformMessageStream;
   private final StoreKeyConverter storeKeyConverter;
+  private final Transformer transformer;
   private final MetricRegistry metricRegistry;
   private final ResponseHandler responseHandler;
   private final boolean replicatingFromRemoteColo;
@@ -110,7 +110,7 @@ class ReplicaThread implements Runnable {
       FindTokenFactory findTokenFactory, ClusterMap clusterMap, AtomicInteger correlationIdGenerator,
       DataNodeId dataNodeId, ConnectionPool connectionPool, ReplicationConfig replicationConfig,
       ReplicationMetrics replicationMetrics, NotificationSystem notification, StoreKeyFactory storeKeyFactory,
-      boolean transformMessageStream, StoreKeyConverter storeKeyConverter, MetricRegistry metricRegistry,
+      StoreKeyConverter storeKeyConverter, Transformer transformer, MetricRegistry metricRegistry,
       boolean replicatingOverSsl, String datacenterName, ResponseHandler responseHandler) {
     this.threadName = threadName;
     this.replicasToReplicateGroupedByNode = replicasToReplicateGroupedByNode;
@@ -123,9 +123,8 @@ class ReplicaThread implements Runnable {
     this.replicationConfig = replicationConfig;
     this.replicationMetrics = replicationMetrics;
     this.notification = notification;
-    this.storeKeyFactory = storeKeyFactory;
-    this.transformMessageStream = transformMessageStream;
     this.storeKeyConverter = storeKeyConverter;
+    this.transformer = transformer;
     this.metricRegistry = metricRegistry;
     this.responseHandler = responseHandler;
     this.replicatingFromRemoteColo = !(dataNodeId.getDatacenterName().equals(datacenterName));
@@ -348,7 +347,7 @@ class ReplicaThread implements Runnable {
                   remoteNode, twoWayConverterCache);
               ExchangeMetadataResponse exchangeMetadataResponse =
                   new ExchangeMetadataResponse(missingStoreKeys, replicaMetadataResponseInfo.getFindToken(),
-                      replicaMetadataResponseInfo.getRemoteReplicaLagInBytes(), twoWayConverterCache);
+                      replicaMetadataResponseInfo.getRemoteReplicaLagInBytes());
               exchangeMetadataResponseList.add(exchangeMetadataResponse);
             } catch (Exception e) {
               replicationMetrics.updateLocalStoreError(remoteReplicaInfo.getReplicaId());
@@ -477,7 +476,7 @@ class ReplicaThread implements Runnable {
    * store keys.  Assumes that input mapping
    * maps remote keys to local keys.
    */
-  private class TwoWayConverterCache implements StoreKeyConverter {
+  private class TwoWayConverterCache {
     private Map<StoreKey, StoreKey> localToRemote;
     private Map<StoreKey, StoreKey> remoteToLocal;
 
@@ -488,6 +487,7 @@ class ReplicaThread implements Runnable {
         localToRemote.put(entry.getValue(), entry.getKey());
       }
     }
+
 
     public StoreKey getRemote(StoreKey localKey) {
       if (!localToRemote.containsKey(localKey)) {
@@ -503,14 +503,19 @@ class ReplicaThread implements Runnable {
       return remoteToLocal.get(remoteKey);
     }
 
-    @Override
-    public Map<StoreKey, StoreKey> convert(Collection<? extends StoreKey> input) throws Exception {
-      Map<StoreKey, StoreKey> map = new HashMap<>();
-      for (StoreKey storeKey : input) {
-        map.put(storeKey, getLocal(storeKey));
-      }
-      return map;
-    }
+//    @Override
+//    public Map<StoreKey, StoreKey> convert(Collection<? extends StoreKey> input) throws Exception {
+//      Map<StoreKey, StoreKey> map = new HashMap<>();
+//      for (StoreKey storeKey : input) {
+//        map.put(storeKey, getLocal(storeKey));
+//      }
+//      return map;
+//    }
+//
+//    @Override
+//    public StoreKey getConverted(StoreKey storeKey) {
+//      return null;
+//    }
   }
 
   /**
@@ -751,8 +756,8 @@ class ReplicaThread implements Runnable {
 
               MessageFormatWriteSet writeset;
               MessageSievingInputStream validMessageDetectionInputStream =
-                  new MessageSievingInputStream(getResponse.getInputStream(), messageInfoList, storeKeyFactory,
-                      transformMessageStream ? exchangeMetadataResponse.cachedConverter : null, metricRegistry);
+                  new MessageSievingInputStream(getResponse.getInputStream(), messageInfoList,
+                      Collections.singletonList(transformer), metricRegistry);
               if (validMessageDetectionInputStream.hasInvalidMessages()) {
                 replicationMetrics.incrementInvalidMessageError(partitionResponseInfo.getPartition());
                 logger.error("Out of " + (messageInfoList.size()) + " messages, " + (messageInfoList.size()
@@ -818,15 +823,15 @@ class ReplicaThread implements Runnable {
     final FindToken remoteToken;
     final long localLagFromRemoteInBytes;
     final ServerErrorCode serverErrorCode;
-    final StoreKeyConverter cachedConverter;
+//    final StoreKeyConverter cachedConverter;
 
 
-    ExchangeMetadataResponse(Set<StoreKey> missingStoreKeys, FindToken remoteToken, long localLagFromRemoteInBytes, StoreKeyConverter cachedConverter) {
+    ExchangeMetadataResponse(Set<StoreKey> missingStoreKeys, FindToken remoteToken, long localLagFromRemoteInBytes) {//}, StoreKeyConverter cachedConverter) {
       this.missingStoreKeys = missingStoreKeys;
       this.remoteToken = remoteToken;
       this.localLagFromRemoteInBytes = localLagFromRemoteInBytes;
       this.serverErrorCode = ServerErrorCode.No_Error;
-      this.cachedConverter = cachedConverter;
+//      this.cachedConverter = cachedConverter;
     }
 
     ExchangeMetadataResponse(ServerErrorCode errorCode) {
@@ -834,7 +839,7 @@ class ReplicaThread implements Runnable {
       remoteToken = null;
       localLagFromRemoteInBytes = -1;
       this.serverErrorCode = errorCode;
-      this.cachedConverter = null;
+//      this.cachedConverter = null;
     }
   }
 

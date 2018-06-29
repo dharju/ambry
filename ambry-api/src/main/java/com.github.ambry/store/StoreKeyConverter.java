@@ -33,5 +33,16 @@ public interface StoreKeyConverter {
    * @return a mapping for each {@link StoreKey} in the new format.
    * @throws Exception that may be thrown when performing the conversion operation
    */
-  public Map<StoreKey, StoreKey> convert(Collection<? extends StoreKey> input) throws Exception;
+  Map<StoreKey, StoreKey> convert(Collection<? extends StoreKey> input) throws Exception;
+
+  /**
+   * Returns converted storeKey. Intended to use after running {@link #convert(Collection)}, as
+   * intention is that this will retrieve an already converted storeKey.  If called prior to
+   * {@link #convert(Collection)} it may throw an IllegalStateException
+   * @param storeKey storeKey you want the converted version of.  If the key was not apart
+   *                 of a previous {@link #convert(Collection)} call, method may throw
+   *                 IllegalStateException
+   * @return the previously converted storeKey
+   */
+  StoreKey getConverted(StoreKey storeKey);
 }

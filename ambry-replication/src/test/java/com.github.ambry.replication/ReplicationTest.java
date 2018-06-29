@@ -34,6 +34,7 @@ import com.github.ambry.messageformat.MessageFormatException;
 import com.github.ambry.messageformat.MessageFormatInputStream;
 import com.github.ambry.messageformat.MessageMetadata;
 import com.github.ambry.messageformat.PutMessageFormatInputStream;
+import com.github.ambry.messageformat.ValidatingTransformer;
 import com.github.ambry.network.ChannelOutput;
 import com.github.ambry.network.ConnectedChannel;
 import com.github.ambry.network.ConnectionPool;
@@ -55,6 +56,7 @@ import com.github.ambry.store.FindToken;
 import com.github.ambry.store.MessageInfo;
 import com.github.ambry.store.MessageReadSet;
 import com.github.ambry.store.MessageWriteSet;
+import com.github.ambry.store.MockStoreKeyConverterFactory;
 import com.github.ambry.store.Store;
 import com.github.ambry.store.StoreErrorCodes;
 import com.github.ambry.store.StoreException;
@@ -62,9 +64,10 @@ import com.github.ambry.store.StoreGetOptions;
 import com.github.ambry.store.StoreInfo;
 import com.github.ambry.store.StoreKey;
 import com.github.ambry.store.StoreKeyConverter;
-import com.github.ambry.store.StoreKeyConverterFactoryImpl;
+import com.github.ambry.store.StoreKeyConverterFactory;
 import com.github.ambry.store.StoreKeyFactory;
 import com.github.ambry.store.StoreStats;
+import com.github.ambry.store.Transformer;
 import com.github.ambry.store.Write;
 import com.github.ambry.utils.ByteBufferInputStream;
 import com.github.ambry.utils.ByteBufferOutputStream;
@@ -130,7 +133,7 @@ public class ReplicationTest {
         new ReplicationMetrics(new MetricRegistry(), clusterMap.getReplicaIds(localHost.dataNodeId));
     replicationMetrics.populatePerColoMetrics(Collections.singleton(remoteHost.dataNodeId.getDatacenterName()));
     StoreKeyFactory storeKeyFactory = Utils.getObj("com.github.ambry.commons.BlobIdFactory", clusterMap);
-    StoreKeyConverter storeKeyConverter = new StoreKeyConverterFactoryImpl(null, null).getStoreKeyConverter();
+    StoreKeyConverterFactory storeKeyConverterFactory = new MockStoreKeyConverterFactory(null, null);
 
     Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate = new HashMap<>();
     CountDownLatch readyToPause = new CountDownLatch(1);
@@ -155,10 +158,12 @@ public class ReplicationTest {
     int batchSize = 4;
     MockConnectionPool connectionPool = new MockConnectionPool(hosts, clusterMap, batchSize);
 
+    StoreKeyConverter storeKeyConverter = storeKeyConverterFactory.getStoreKeyConverter();
+    Transformer transformer = new ValidatingTransformer(storeKeyFactory, storeKeyConverter);
     ReplicaThread replicaThread =
         new ReplicaThread("threadtest", replicasToReplicate, new MockFindTokenFactory(), clusterMap,
             new AtomicInteger(0), localHost.dataNodeId, connectionPool, config, replicationMetrics, null,
-            storeKeyFactory, true, storeKeyConverter, clusterMap.getMetricRegistry(), false,
+            storeKeyFactory, storeKeyConverter, transformer, clusterMap.getMetricRegistry(), false,
             localHost.dataNodeId.getDatacenterName(), new ResponseHandler(clusterMap));
     Thread thread = Utils.newThread(replicaThread, false);
     thread.start();
@@ -227,7 +232,7 @@ public class ReplicationTest {
         new ReplicationMetrics(new MetricRegistry(), clusterMap.getReplicaIds(localHost.dataNodeId));
     replicationMetrics.populatePerColoMetrics(Collections.singleton(remoteHost.dataNodeId.getDatacenterName()));
     StoreKeyFactory storeKeyFactory = Utils.getObj("com.github.ambry.commons.BlobIdFactory", clusterMap);
-    StoreKeyConverter storeKeyConverter = new StoreKeyConverterFactoryImpl(null, null).getStoreKeyConverter();
+    StoreKeyConverterFactory storeKeyConverterFactory = new MockStoreKeyConverterFactory(null, null);
     Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate = new HashMap<>();
     replicasToReplicate.put(remoteHost.dataNodeId, localHost.getRemoteReplicaInfos(remoteHost, null));
     Map<DataNodeId, Host> hosts = new HashMap<>();
@@ -235,10 +240,12 @@ public class ReplicationTest {
     int batchSize = 4;
     MockConnectionPool connectionPool = new MockConnectionPool(hosts, clusterMap, batchSize);
 
+    StoreKeyConverter storeKeyConverter = storeKeyConverterFactory.getStoreKeyConverter();
+    Transformer transformer = new ValidatingTransformer(storeKeyFactory, storeKeyConverter);
     ReplicaThread replicaThread =
         new ReplicaThread("threadtest", replicasToReplicate, new MockFindTokenFactory(), clusterMap,
             new AtomicInteger(0), localHost.dataNodeId, connectionPool, config, replicationMetrics, null,
-            storeKeyFactory, true, storeKeyConverter, clusterMap.getMetricRegistry(), false,
+            storeKeyFactory, storeKeyConverter, transformer, clusterMap.getMetricRegistry(), false,
             localHost.dataNodeId.getDatacenterName(), new ResponseHandler(clusterMap));
 
     Map<PartitionId, Integer> progressTracker = new HashMap<>();
@@ -334,7 +341,7 @@ public class ReplicationTest {
       // add an expired message to the remote host only
       StoreKey id =
           new BlobId(blobIdVersion, BlobId.BlobIdType.NATIVE, ClusterMapUtils.UNKNOWN_DATACENTER_ID, accountId,
-              containerId, partitionId, toEncrypt);
+              containerId, partitionId, toEncrypt, BlobId.BlobDataType.DATACHUNK);
       Pair<ByteBuffer, MessageInfo> putMsgInfo = getPutMessage(id, accountId, containerId, toEncrypt);
       remoteHost.addMessage(partitionId,
           new MessageInfo(id, putMsgInfo.getFirst().remaining(), 1, accountId, containerId,
@@ -349,7 +356,7 @@ public class ReplicationTest {
       toEncrypt = TestUtils.RANDOM.nextBoolean();
       // add a corrupt message to the remote host only
       id = new BlobId(blobIdVersion, BlobId.BlobIdType.NATIVE, ClusterMapUtils.UNKNOWN_DATACENTER_ID, accountId,
-          containerId, partitionId, toEncrypt);
+          containerId, partitionId, toEncrypt, BlobId.BlobDataType.DATACHUNK);
       putMsgInfo = getPutMessage(id, accountId, containerId, toEncrypt);
       byte[] data = putMsgInfo.getFirst().array();
       // flip every bit in the array
@@ -391,10 +398,11 @@ public class ReplicationTest {
     int batchSize = 4;
     MockConnectionPool connectionPool = new MockConnectionPool(hosts, clusterMap, batchSize);
 
+    Transformer transformer = new ValidatingTransformer(storeKeyFactory, storeKeyConverter);
     ReplicaThread replicaThread =
         new ReplicaThread("threadtest", replicasToReplicate, new MockFindTokenFactory(), clusterMap,
             new AtomicInteger(0), localHost.dataNodeId, connectionPool, config, replicationMetrics, null,
-            storeKeyFactory, true, storeKeyConverter, clusterMap.getMetricRegistry(), false,
+            storeKeyFactory, storeKeyConverter, transformer, clusterMap.getMetricRegistry(), false,
             localHost.dataNodeId.getDatacenterName(), new ResponseHandler(clusterMap));
 
     Map<PartitionId, List<ByteBuffer>> missingBuffers = remoteHost.getMissingBuffers(localHost.buffersByPartition);
@@ -706,7 +714,7 @@ public class ReplicationTest {
       short blobIdVersion = CommonTestUtils.getCurrentBlobIdVersion();
       boolean toEncrypt = i % 2 == 0;
       BlobId id = new BlobId(blobIdVersion, BlobId.BlobIdType.NATIVE, ClusterMapUtils.UNKNOWN_DATACENTER_ID, accountId,
-          containerId, partitionId, toEncrypt);
+          containerId, partitionId, toEncrypt, BlobId.BlobDataType.DATACHUNK);
       ids.add(id);
       Pair<ByteBuffer, MessageInfo> putMsgInfo = getPutMessage(id, accountId, containerId, toEncrypt);
       for (Host host : hosts) {
@@ -722,7 +730,7 @@ public class ReplicationTest {
     short blobIdVersion = CommonTestUtils.getCurrentBlobIdVersion();
     boolean toEncrypt = Utils.getRandomShort(TestUtils.RANDOM) % 2 == 0;
     return new BlobId(blobIdVersion, BlobId.BlobIdType.NATIVE, ClusterMapUtils.UNKNOWN_DATACENTER_ID, accountId,
-        containerId, partitionId, toEncrypt);
+        containerId, partitionId, toEncrypt, BlobId.BlobDataType.DATACHUNK);
   }
 
   private void addPutMessagesToReplicasOfPartition(List<StoreKey> ids, List<Host> hosts)

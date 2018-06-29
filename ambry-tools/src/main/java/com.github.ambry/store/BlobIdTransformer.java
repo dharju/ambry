@@ -26,9 +26,6 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 import static com.github.ambry.messageformat.MessageFormatRecord.*;
@@ -43,35 +40,32 @@ public class BlobIdTransformer implements Transformer {
   private final StoreKeyConverter storeKeyConverter;
   private final StoreKeyFactory storeKeyFactory;
 
-  public BlobIdTransformer(StoreKeyConverter storeKeyConverter, StoreKeyFactory storeKeyFactory) {
+  /**
+   * StoreKeyConverter should already have converted the expected list of IDs.
+   * @param storeKeyConverter
+   * @param storeKeyFactory
+   */
+  public BlobIdTransformer(StoreKeyFactory storeKeyFactory, StoreKeyConverter storeKeyConverter) {
     this.storeKeyFactory = Objects.requireNonNull(storeKeyFactory, "storeKeyFactory must not be null");
     this.storeKeyConverter = Objects.requireNonNull(storeKeyConverter, "storeKeyConverter must not be null");
   }
 
-  /**
-   * Takes the input message and transforms it by possibly
-   * replacing the store key and account/container IDs
-   * with a new store key and account/container IDs
-   * @param message
-   * @return
-   * @throws Exception
-   */
   @Override
   public TransformationOutput transform(Message message) {
+    Message transformedMsg = null;
     try {
       Objects.requireNonNull(message, "message must not be null");
       Objects.requireNonNull(message.getMessageInfo(), "message's messageInfo must not be null");
-      Objects.requireNonNull(message.getBytes(), "message's inputStream must not be null");
+      Objects.requireNonNull(message.getStream(), "message's inputStream must not be null");
       StoreKey oldStoreKey = message.getMessageInfo().getStoreKey();
-      StoreKey newStoreKey;
-      List<StoreKey> list = Collections.singletonList(oldStoreKey);
-      Map<StoreKey, StoreKey> storeKeyToStoreKey = storeKeyConverter.convert(list);
-      newStoreKey = storeKeyToStoreKey.get(oldStoreKey);
-      Message newMessage = newMessage(new ByteArrayInputStream(message.getBytes()), newStoreKey);
-      return new TransformationOutput(null, newMessage);
+      StoreKey newStoreKey = storeKeyConverter.getConverted(oldStoreKey);
+      if (newStoreKey != null) {
+        transformedMsg = newMessage(message.getStream(), newStoreKey);
+      }
     } catch (Exception e) {
-      return new TransformationOutput(e, null);
+      return new TransformationOutput(e);
     }
+    return new TransformationOutput(transformedMsg);
   }
 
   /**
@@ -147,9 +141,7 @@ public class BlobIdTransformer implements Transformer {
       MessageInfo info = new MessageInfo(newKey, putMessageFormatInputStream.getSize(),
           Utils.addSecondsToEpochTime(newProperties.getCreationTimeInMs(), newProperties.getTimeToLiveInSeconds()),
           newProperties.getAccountId(), newProperties.getContainerId(), newProperties.getCreationTimeInMs());
-      byte[] streamBytes = new byte[(int) putMessageFormatInputStream.getSize()];
-      putMessageFormatInputStream.read(streamBytes);
-      return new Message(info, streamBytes);
+      return new Message(info, putMessageFormatInputStream);
     } else {
       throw new IllegalArgumentException("Only 'put' records are valid");
     }
