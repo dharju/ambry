@@ -65,6 +65,7 @@ import com.github.ambry.store.StoreInfo;
 import com.github.ambry.store.StoreKey;
 import com.github.ambry.store.StoreKeyConverter;
 import com.github.ambry.store.StoreKeyConverterFactory;
+import com.github.ambry.store.StoreKeyConverterFactoryImpl;
 import com.github.ambry.store.StoreKeyFactory;
 import com.github.ambry.store.StoreStats;
 import com.github.ambry.store.Transformer;
@@ -133,7 +134,10 @@ public class ReplicationTest {
         new ReplicationMetrics(new MetricRegistry(), clusterMap.getReplicaIds(localHost.dataNodeId));
     replicationMetrics.populatePerColoMetrics(Collections.singleton(remoteHost.dataNodeId.getDatacenterName()));
     StoreKeyFactory storeKeyFactory = Utils.getObj("com.github.ambry.commons.BlobIdFactory", clusterMap);
-    StoreKeyConverterFactory storeKeyConverterFactory = new MockStoreKeyConverterFactory(null, null);
+    MockStoreKeyConverterFactory mockStoreKeyConverterFactory = new MockStoreKeyConverterFactory(null, null);
+    mockStoreKeyConverterFactory.setReturnInputIfAbsent(true);
+    mockStoreKeyConverterFactory.setConversionMap(new HashMap<>());
+    StoreKeyConverterFactory storeKeyConverterFactory = mockStoreKeyConverterFactory;
 
     Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate = new HashMap<>();
     CountDownLatch readyToPause = new CountDownLatch(1);
@@ -232,7 +236,9 @@ public class ReplicationTest {
         new ReplicationMetrics(new MetricRegistry(), clusterMap.getReplicaIds(localHost.dataNodeId));
     replicationMetrics.populatePerColoMetrics(Collections.singleton(remoteHost.dataNodeId.getDatacenterName()));
     StoreKeyFactory storeKeyFactory = Utils.getObj("com.github.ambry.commons.BlobIdFactory", clusterMap);
-    StoreKeyConverterFactory storeKeyConverterFactory = new MockStoreKeyConverterFactory(null, null);
+    MockStoreKeyConverterFactory storeKeyConverterFactory = new MockStoreKeyConverterFactory(null, null);
+    storeKeyConverterFactory.setConversionMap(new HashMap<>());
+    storeKeyConverterFactory.setReturnInputIfAbsent(true);
     Map<DataNodeId, List<RemoteReplicaInfo>> replicasToReplicate = new HashMap<>();
     replicasToReplicate.put(remoteHost.dataNodeId, localHost.getRemoteReplicaInfos(remoteHost, null));
     Map<DataNodeId, Host> hosts = new HashMap<>();
@@ -943,6 +949,11 @@ public class ReplicationTest {
             Map<StoreKey, StoreKey> map =
                 storeKeyConverter.convert(Collections.singletonList(messageInfo.getStoreKey()));
             convertedKey = map.get(messageInfo.getStoreKey());
+//            try {
+//              convertedKey = storeKeyConverter.getConverted(messageInfo.getStoreKey());
+//            } catch (IllegalStateException e) {
+//              convertedKey = messageInfo.getStoreKey();
+//            }
             if (convertedKey == null) {
               continue;
             }
